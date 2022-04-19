@@ -41,6 +41,7 @@ export
     EdgeConv,
     GINConv,
     CGConv,
+    SAGEConv,
 
     # layer/pool
     GlobalPool,

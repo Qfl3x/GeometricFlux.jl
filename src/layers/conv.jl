@@ -765,3 +765,74 @@ function Base.show(io::IO, l::CGConv)
     edge_dim = d - 2*node_dim
     print(io, "CGConv(node dim=", node_dim, ", edge dim=", edge_dim, ")")
 end
+
+"""
+    SAGEConv(in => out, σ=identity, aggr=mean; bias=true, init=glorot_uniform)
+
+SAmple and aggreGatE convolutional layer for GraphSAGE network0.
+
+# Arguments
+
+- `in`: The dimension of input features.
+- `out`: The dimension of output features.
+- `σ`: Activation function.
+- `aggr`: An aggregate function applied to the result of message function. `mean`, `max`,
+`LSTM` and `GCNConv` are available.
+- `init`: Weights' initializer.
+
+See also [`WithGraph`](@ref) for training layer with static graph.
+"""
+struct SAGEConv{A,B,F,P,O} <: MessagePassing
+    weights::A
+    bias::B
+    σ::F
+    proj::P
+    aggr::O
+    normalize::Bool
+    num_sample::Int
+end
+
+function SAGEConv(ch::Pair{Int,Int}, σ=identity, aggr=mean;
+                  normalize::Bool=true, project::Bool=false, bias::Bool=true,
+                  num_sample=10, init=glorot_uniform)
+    in, out = ch
+    weights = init(out, in)
+    bias = Flux.create_bias(W, bias, out)
+    proj = project ? Dense(in, in) : identity
+    return SAGEConv(weights, bias, σ, proj, aggr, normalize, num_sample)
+end
+
+@functor SAGEConv
+
+message(::SAGEConv, x_i, x_j::AbstractArray, e) = sample(x_j)
+
+function update(l::SAGEConv, m::AbstractArray, x::AbstractArray)
+    y = l.σ.(l.weights * vcat(x, m))
+
+    if l.normalize
+        l2norm = .√(sum(abs2, y, dims=2))  # across all nodes
+        y = y ./ l2norm
+    end
+
+    return y
+end
+
+# For variable graph
+function (l::SAGEConv)(fg::AbstractFeaturedGraph)
+    nf = node_feature(fg)
+    GraphSignals.check_num_nodes(fg, nf)
+
+    _, V, _ = propagate(l, graph(fg), nothing, nf, nothing, +, nothing, nothing)
+    return ConcreteFeaturedGraph(fg, nf=V)
+end
+
+# For static graph
+function (l::SAGEConv)(el::NamedTuple, x::AbstractArray)
+    GraphSignals.check_num_nodes(el.N, x)
+    _, V, _ = propagate(l, el, nothing, x, nothing, +, nothing, nothing)
+    return V
+end
+
+function Base.show(io::IO, l::SAGEConv)
+    print(io, "SAGEConv(", l.nn, ", ϵ=", l.eps, ")")
+end

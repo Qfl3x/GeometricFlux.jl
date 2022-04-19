@@ -357,4 +357,34 @@
             @test length(g.grads) == 4
         end
     end
+
+    @testset "SAGEConv" begin
+        aggregators = [mean, max, Flux.LSTMCell(), GCNConv]
+        @testset "layer without graph" begin
+            for aggr in aggregators
+                l = SAGEConv(in_channel=>out_channel, aggr=aggr)
+
+                X = rand(T, in_channel, N)
+                fg = FeaturedGraph(adj, nf=X)
+                fg_ = l(fg)
+                @test size(node_feature(fg_)) == (out_channel, N)
+                @test_throws MethodError l(X)
+
+                g = Zygote.gradient(() -> sum(node_feature(l(fg))), Flux.params(l))
+                @test length(g.grads) == 4
+            end
+        end
+        
+        @testset "layer with static graph" begin
+            for aggr in aggregators
+                X = rand(T, in_channel, N, batch_size)
+                l = WithGraph(fg, SAGEConv(in_channel=>out_channel, aggr=aggr))
+                Y = l(X)
+                @test size(Y) == (out_channel, N, batch_size)
+
+                g = Zygote.gradient(() -> sum(l(X)), Flux.params(l))
+                @test length(g.grads) == 2
+            end
+        end
+    end
 end
